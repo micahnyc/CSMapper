@@ -20,6 +20,7 @@ static NSString * const CSMappingKeyKey = @"key";
 static NSString * const CSMappingClassKey = @"type";
 static NSString * const CSMappingGroupsKey = @"groups";
 static NSString * const CSMappingArraySubTypeKey = @"array_subtype";
+static NSString * const CSMappingDictionarySubTypeKey = @"dictionary_subtype";
 static NSString * const CSMappingMapperKey = @"mapper";
 static NSString * const CSMappingDefaultKey = @"default";
 
@@ -80,6 +81,7 @@ static NSString * const CSMappingDefaultKey = @"default";
 	id outputValue = nil;
 	id subValue = nil;
     id arraySubTypeValue = nil;
+    id dictionarySubTypeValue = nil;
 	Class forcedClass = nil;
 	NSString *forcedClassString = nil;
 	NSArray *mappingGroups;
@@ -166,6 +168,7 @@ static NSString * const CSMappingDefaultKey = @"default";
             
             //check to see if there is a type for the objects in an array
             arraySubTypeValue =  [propertyMapping objectForKey:CSMappingArraySubTypeKey];
+            dictionarySubTypeValue =  [propertyMapping objectForKey:CSMappingDictionarySubTypeKey];
         
             if ([inputValue isKindOfClass:[NSArray class]] && arraySubTypeValue) {
                 forcedClassString = arraySubTypeValue;
@@ -179,8 +182,22 @@ static NSString * const CSMappingDefaultKey = @"default";
                     [newSubObjectArray addObject:newValue];
                 }
                 outputValue = newSubObjectArray;
+            } else if ([inputValue isKindOfClass:[NSDictionary class]] && dictionarySubTypeValue) {
+                forcedClassString = dictionarySubTypeValue;
+                forcedClass = NSClassFromString(dictionarySubTypeValue);
+                
+                NSMutableDictionary *newSubObjectDict = [NSMutableDictionary new];
+                
+                for (id subobjectKey in inputValue) {
+                    
+                    id newValue = [[forcedClass alloc] init];
+                    
+                    [newValue mapAttributesWithDictionary:[inputValue objectForKey:subobjectKey]];
+                    [newSubObjectDict setObject:newValue forKey:subobjectKey];
+                }
+                outputValue = newSubObjectDict;
             }
-
+            
 			if (mapperClass && mapperClass) {
 				outputValue = [(id<CSMapper>)mapperClass transformValue:inputValue];
 			}
@@ -205,7 +222,6 @@ static NSMutableDictionary *mappingCache = NULL;
     if (cached) {
         return cached;
     }
-
 	// Check for .plist, if it doesn't exist, check for JSON
 	NSString *filePath = [[NSBundle bundleForClass:[self class]] pathForResource:entityKey ofType:@"plist"];
 	NSDictionary *mapping = nil;
@@ -213,27 +229,33 @@ static NSMutableDictionary *mappingCache = NULL;
 		mapping = [NSDictionary dictionaryWithContentsOfFile:filePath];
 	} else {
 		filePath = [[NSBundle bundleForClass:[self class]] pathForResource:entityKey ofType:@"json"];
-		mapping = [NSJSONSerialization JSONObjectWithData:[NSData dataWithContentsOfFile:filePath] options:0 error:nil];
+        NSData *fileData = [NSData dataWithContentsOfFile:filePath];
+        if (fileData && fileData.length > 0) {
+            mapping = [NSJSONSerialization JSONObjectWithData:fileData options:0 error:nil];
+        }
 	}
 
-	NSAssert(mapping != nil, @"Mapping for %@ could not be found", entityKey);
-	
-	id parentEntityMapping = [mapping objectForKey:CSMappingParentKey];
-	NSArray *parents = [NSArray array];
-	if ([parentEntityMapping isKindOfClass:[NSArray class]]) {
-		parents = parentEntityMapping;
-	} else if (parentEntityMapping != nil) {
-		parents = [NSArray arrayWithObject:parentEntityMapping];
-	}
-	
-	NSMutableDictionary *mappingResult = [NSMutableDictionary dictionary];
-	for (NSString *parent in parents) {
-		[mappingResult addEntriesFromDictionary:[[self class] mappingForEntity:parent]];
-	}
+	if (mapping) {
+        id parentEntityMapping = [mapping objectForKey:CSMappingParentKey];
+        NSArray *parents = [NSArray array];
+        if ([parentEntityMapping isKindOfClass:[NSArray class]]) {
+            parents = parentEntityMapping;
+        } else if (parentEntityMapping != nil) {
+            parents = [NSArray arrayWithObject:parentEntityMapping];
+        }
+        
+        NSMutableDictionary *mappingResult = [NSMutableDictionary dictionary];
+        for (NSString *parent in parents) {
+            [mappingResult addEntriesFromDictionary:[[self class] mappingForEntity:parent]];
+        }
 
-	[mappingResult addEntriesFromDictionary:mapping];
-    [mappingCache setObject:mappingResult forKey:entityKey];
-	return mappingResult;
+        [mappingResult addEntriesFromDictionary:mapping];
+        [mappingCache setObject:mappingResult forKey:entityKey];
+        return mappingResult;
+    } else {
+        return [NSMutableDictionary dictionary];
+    }
+	
 }
 
 
